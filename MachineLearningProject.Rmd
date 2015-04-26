@@ -1,0 +1,105 @@
+# Machine Learning Project  
+## Goal
+Build a model that will use accelerometers on the belt, forearm, arm, and dumbell to determine if an exercise is done correctly.
+
+*special thanks to  http://groupware.les.inf.puc-rio.br/har for providing the data*
+
+## Load the data
+Bring in necessary libraries.  
+Download the data from the given web site.  
+To reduce web site download traffic, only download once.  
+Load the data into two data frames - one for training, one for testing.
+```{r}
+library(caret)
+library(e1071)
+library(corrplot)
+
+#training data
+if (!file.exists("pml-training.csv")) {
+        download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                      destfile = "pml-training.csv")
+}
+#testing data
+if (!file.exists("pml-testing.csv")) {
+        download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                      destfile = "pml-testing.csv")
+}
+
+initialData <- read.csv("pml-training.csv", header = TRUE, na.strings = c("NA",""))
+myVal <- read.csv("pml-testing.csv", header = TRUE, na.strings = c("NA",""))
+```
+
+## Pre-process
+Will only pre-process Training set at first, Testing set will be prepreocessed at end.  
+Data must be cleaned by removing NA's.  
+Also, first 7 columns are not needed.  
+Set the seed for random numbers so that the models are reproducable.  
+Finally, split into a testing and a training dataset.  Testing data will be checked at the end, only once.
+```{r}
+initialData <- initialData[,(colSums(is.na(initialData)) == 0)]
+initialData <- initialData[,-c(1:7)]
+set.seed(321)
+part = createDataPartition(y = initialData$classe, p = 0.7, list = FALSE)
+Train <- initialData[part,]
+Test <- initialData[-part,]
+```
+## Analysis
+Plot correlated data (not correlated to predictor).  This correlation plot shows variables correlated to each other.  We will remove those correlated to each other to avoid bias in the model.  Don't want to plot the predicted value itself (classe).
+```{r}
+myCor <- cor(Train[, -53])
+corrplot(myCor, 
+         method = "color", 
+         type = "lower", 
+         add=FALSE, 
+         col=NULL, 
+         bg="white",
+         title="Correlation Plot of Train",
+         outline= TRUE,
+         order = "FPC", 
+         tl.cex = 0.8, 
+         tl.col = "black")
+```
+## Further pre-processing
+Use Principal Component Analysis to remove correlated data.  Default threshold is .8, we want more data columns to be utilized, so decided to use a threshold of .9.
+```{r}
+preProc <- preProcess(Train[, -53], method = "pca", thresh = 0.9)
+PCA_Train <- predict(preProc, Train[, -53])
+```
+##  Build Model
+Use a random forest predictor as it is non-linear.  
+Caution should be taken as it is prone to over-fitting.  
+This step takes a bit of time to complete.
+```{r}
+myForest <- train(Train$classe ~ ., method = "rf", data = PCA_Train, trControl = trainControl(method = "cv", number = 4), importance = TRUE)
+```
+## Model Analysis
+Produce a confusion matrix to review model, notice that the accuracy is 1.  
+This is a very good accuracy, but concerned about over-fitting of Training data.  
+```{r}
+pred_Forest <- predict(myForest, PCA_Train)
+confusTrain <- confusionMatrix(Train$classe, pred_Forest)
+confusTrain$table
+accuracyTrain <- postResample(Train$classe, pred_Forest)
+accuracyTrain[[1]]
+```
+## Check model against test set
+Excect the sample output error to be very high, greather than .9.  
+Note that the accuracy is very good, above .9.
+```{r}
+PCA_Test <- predict(preProc, Test[, -53])
+pred_Forest_Test <- predict(myForest, PCA_Test)
+confusTest <- confusionMatrix(Test$classe, pred_Forest_Test)
+confusTest$table
+accuracyTest <- postResample(Test$classe, pred_Forest_Test)
+accuracyTest[[1]]
+```
+
+## Apply methods to Validation Set
+Clean up Test set and run predictor on Validation
+```{r}
+myVal <- myVal[,(colSums(is.na(myVal)) == 0)]
+myVal <- myVal[,-c(1:7)]
+PCA_Val <- predict(preProc, myVal[, -53])
+pred_val <- predict(myForest, PCA_Val)
+pred_val
+```
